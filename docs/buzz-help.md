@@ -137,6 +137,8 @@ the interface unless an available tool actually supports that action.
 
 - Plugins can add features. **Settings → Plugins → Manage plugins** controls
   them. Do not assume a particular optional plugin is on.
+  If a plugin hides the focused Team sidebar row, keyboard focus moves to a
+  remaining row in its section, or the section heading when none remains.
 - Some plugins let the person's other agents on this computer, such as Claude
   Code, Codex or Pi, use their tools while Buzz is open. Those agents run the
   helper Buzz installs, for example
