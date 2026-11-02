@@ -25,7 +25,19 @@ Policy changes and newly committed identities after opt-in allocate from that
 clock. Joins copy the identity's generation; defaults-only writes, deletion and
 forgetting the final identity preserve the clock. Re-importing the same public
 key cannot revive an earlier generation. Protected durable runtime state uses a
-new namespace, so an older preview's ambiguous history is not resumed.
+new namespace, so an older preview's ambiguous history is not resumed. Codex records the
+protection `stateKey` with each saved thread and resumes it only under the same
+key, so a policy change, or moving between unprotected and protected, starts a
+new thread.
+
+Protected Codex runs in Buzz's Codex home, like unprotected Codex. Its security
+reviews run in a separate Buzz review home, which the security plugin keeps
+read-only to contained workers. That home holds only links to the sign-in and to
+the state Codex must write, and reviews turn off project instructions, skills and
+memories, so no Codex settings, instructions, skills or memories reach a review.
+A contained worker can still replace the shared sign-in, which changes only the
+account reviews use. Keyring sign-in and custom model providers do not apply to
+Codex reviews, which fail closed.
 
 An earlier protection preview could save a version-2 identity envelope that
 omitted memberships still present in its sidecar. Buzz refuses that incomplete

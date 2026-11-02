@@ -56,6 +56,14 @@ original untouched; a missing rollout starts a new thread.
   through Buzz updates the shared credentials unless they are newer. Keyring
   sign-in is scoped to the home and needs a separate Buzz sign-in.
 
+Protected agents run in this home too. Security reviews run in a separate Buzz
+review home (`codex-review-home` beside the releases), which the security plugin
+keeps read-only to contained workers. It holds only a link to the shared
+`auth.json` and links to a `codex-review-state` folder for the names Codex writes
+at startup. Reviews also turn off project instructions, skills and memories, so
+no Codex settings, instructions, skills or memories reach a review. Keyring
+sign-in and custom model providers do not apply to reviews, which fail closed.
+
 See the launcher for home recovery when a desktop build inherits Buzz's
 `CODEX_HOME`, credential synchronization and rollout adoption.
 

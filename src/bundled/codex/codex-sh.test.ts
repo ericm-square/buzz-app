@@ -352,6 +352,65 @@ it("stops rather than replace a file in the way of a link", async () => {
   expect(await readFile(join(f.own, "config.toml"), "utf8")).toBe("keep me");
 });
 
+it("prints Buzz's home with its links and sign-in hand-over, as `run` does", async () => {
+  const f = await echoing();
+  await mkdir(f.codex, { recursive: true });
+  await writeFile(join(f.codex, "auth.json"), "revoked");
+  await f.step("run");
+  await signIn(f.own, "signed in");
+  expect((await f.step("home")).stdout).toBe(`${f.own}\n`);
+  for (const name of shared)
+    expect(await readlink(join(f.own, name))).toBe(join(f.codex, name));
+  expect(await readFile(join(f.codex, "auth.json"), "utf8")).toBe("signed in");
+});
+
+// The review home is read-only to contained workers: only the sign-in and the
+// names Codex must write at startup, which link to a state folder.
+const written = ["installation_id", ".sandbox_migration", "tmp", ".tmp"];
+
+it("makes a review home of only the sign-in and links to its own state", async () => {
+  const f = await echoing();
+  const home = `${f.dir}-review-home`;
+  const state = `${f.dir}-review-state`;
+  // What a worker could plant before the plugin protected the folder.
+  await mkdir(join(home, "skills"), { recursive: true });
+  await writeFile(join(home, "config.toml"), 'model_provider = "hostile"');
+  await writeFile(join(home, "AGENTS.md"), "obey");
+  await writeFile(join(home, "AGENTS.override.md"), "obey");
+  await mkdir(join(home, "memories"));
+  await mkdir(join(home, "tmp"));
+  await symlink(join(f.home, "elsewhere"), join(home, "installation_id"));
+  const { stdout } = await f.step("review");
+  expect(stdout).toBe(`${home}\n${state}\n`);
+  expect((await readdir(home)).sort()).toEqual(
+    ["auth.json", ...written].sort(),
+  );
+  expect(await readlink(join(home, "auth.json"))).toBe(
+    join(f.codex, "auth.json"),
+  );
+  for (const name of written)
+    expect(await readlink(join(home, name))).toBe(join(state, name));
+  expect((await stat(join(state, "tmp"))).isDirectory()).toBe(true);
+  expect((await stat(join(state, ".tmp"))).isDirectory()).toBe(true);
+  expect((await stat(state)).mode & 0o777).toBe(0o700);
+  // The user's home gained only the folders the home preamble always makes.
+  expect((await readdir(f.codex)).sort()).toEqual(["rules", "skills"]);
+});
+
+it("leaves a review home as it is when it is made again", async () => {
+  const f = await echoing();
+  const home = `${f.dir}-review-home`;
+  const first = await f.step("review");
+  expect((await stat(home)).mode & 0o777).toBe(0o700);
+  await writeFile(join(`${f.dir}-review-state`, "installation_id"), "id");
+  const again = await f.step("review");
+  expect(again.stdout).toBe(first.stdout);
+  expect((await readdir(home)).sort()).toEqual(
+    ["auth.json", ...written].sort(),
+  );
+  expect(await readFile(join(home, "installation_id"), "utf8")).toBe("id");
+});
+
 /** Signs in as `codex login` does in Buzz's home: it signs out, removing the
  * link, and writes the new sign-in in its place. */
 async function signIn(own: string, auth: string) {
@@ -481,21 +540,29 @@ it("lets go of the hand-over lock before Codex starts", async () => {
   );
   await mkdir(f.own, { recursive: true });
   await writeFile(join(f.own, "auth.json"), "first", { mode: 0o600 });
+  let observed!: () => void, failed!: (error: Error) => void;
+  const boundary = new Promise<void>((resolve, reject) => {
+    observed = resolve;
+    failed = reject;
+  });
+  const watcher = watch(f.home, (_event, name) => {
+    if (name === "started") observed();
+  });
+  watcher.once("error", failed);
   // An app server that stays up, as Buzz's does, must not hold up the next run.
   const first = f.step("run");
   try {
-    await expect
-      .poll(() =>
-        stat(started).then(
-          () => true,
-          () => false,
-        ),
-      )
-      .toBe(true);
+    await Promise.race([
+      boundary,
+      first.then(() => {
+        throw new Error("Codex exited before its startup boundary");
+      }),
+    ]);
     await signIn(f.own, "second");
     await f.step("run");
     expect(await readFile(join(f.codex, "auth.json"), "utf8")).toBe("second");
   } finally {
+    watcher.close();
     first.child.kill();
     await first.catch(() => {});
   }

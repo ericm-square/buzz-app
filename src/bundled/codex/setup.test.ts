@@ -5,7 +5,29 @@ import type {
 } from "../../features/host/service";
 import script from "./codex.sh?raw";
 import type { Wire } from "./rpc";
-import { checkCodex, CodexSetup, withScript } from "./setup";
+import {
+  buzzHome,
+  checkCodex,
+  CodexSetup,
+  reviewHome,
+  withScript,
+} from "./setup";
+import manifest from "./manifest.json";
+
+it("declares protected file reads through the bundled helper with a positional path", () => {
+  expect(
+    manifest.host.processes.find((process) => process.id === "read-protected"),
+  ).toEqual({
+    id: "read-protected",
+    program: "buzz-agent-command",
+    bundled: true,
+    args: [
+      "--shell",
+      `case "$1" in "~/"*) set -- "$HOME/\${1:2}";; esac; exec /usr/bin/base64 -i "$1"`,
+      "buzz-read",
+    ],
+  });
+});
 
 type Result = { stdout?: string; stderr?: string; code: number | null };
 
@@ -344,6 +366,23 @@ it("starts Codex, its app server and install steps as steps of codex.sh", async 
     { id: "codex-sh", args: [script, "codex.sh", "use", "0.163.0"] },
     { id: "platform", args: [] },
   ]);
+});
+
+it("looks up Buzz's homes, and refuses a step that prints no home", async () => {
+  const good = scripted({
+    home: { stdout: "/buzz/codex-home\n" },
+    review: { stdout: "/buzz/review-home\n/buzz/review-state\n" },
+  });
+  await expect(buzzHome(good.spawn)).resolves.toBe("/buzz/codex-home");
+  await expect(reviewHome(good.spawn)).resolves.toEqual({
+    home: "/buzz/review-home",
+    state: "/buzz/review-state",
+  });
+  const empty = scripted({ home: { stdout: "" }, review: { stdout: "/a\n" } });
+  await expect(buzzHome(empty.spawn)).rejects.toThrow("home is unavailable");
+  await expect(reviewHome(empty.spawn)).rejects.toThrow(
+    "review is unavailable",
+  );
 });
 
 /** `releases` whose first `id` process waits until `release` is called. */

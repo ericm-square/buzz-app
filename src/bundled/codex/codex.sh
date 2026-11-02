@@ -7,6 +7,9 @@
 #   use VERSION                    makes a downloaded release the one in use
 #   adopt THREAD                   copies a thread Buzz saved in the user's
 #                                  Codex home into Buzz's
+#   home                           prints Buzz's Codex home
+#   review                         makes Buzz's review home, and prints it and
+#                                  the state folder it links to
 set -eu
 
 # Shared by every Buzz build on this computer, so there is one download.
@@ -47,7 +50,7 @@ shift
 # out of the user's Codex history, and the Codex app, which holds a writer lock
 # on each recent thread it reopens, can't block them. It links in only the
 # settings, sign-in and instructions, and never replaces a file in the way.
-if [ "$command" = run ] || [ "$command" = adopt ]; then
+case "$command" in run | adopt | home | review)
   mkdir -p "${CODEX_HOME:-$HOME/.codex}"
   shared=$(cd "${CODEX_HOME:-$HOME/.codex}" && pwd -P)
   mkdir -p -m 700 "$dir-home"
@@ -97,7 +100,8 @@ if [ "$command" = run ] || [ "$command" = adopt ]; then
       { echo "Buzz's Codex setup conflicts with $home/$name" >&2; exit 1; }
   done
   export CODEX_HOME="$home"
-fi
+  ;;
+esac
 case "$command" in
 run)
   # Even a shared `sqlite_home` setting must not lead back to the user's history.
@@ -186,6 +190,29 @@ adopt)
     ln "$copy.$$" "$copy" 2>/dev/null || true
     rm -f "$copy.$$"
   done
+  ;;
+home)
+  printf '%s\n' "$home"
+  ;;
+review)
+  # The security plugin keeps this home read-only to every contained worker, so
+  # nothing one writes (config.toml, AGENTS.md, skills, memories, rules) can
+  # reach a review: it holds only the sign-in and the names Codex must write at
+  # startup, linked to a state folder. Shared with the plugin, by path. Anything
+  # else, such as a file planted before the plugin protected it, is removed.
+  mkdir -p -m 700 "$dir-review-state" "$dir-review-home"
+  state=$(cd "$dir-review-state" && pwd -P)
+  review=$(cd "$dir-review-home" && pwd -P)
+  mkdir -p "$state/tmp" "$state/.tmp"
+  find "$review" -mindepth 1 -maxdepth 1 ! -name auth.json ! -name installation_id \
+    ! -name .sandbox_migration ! -name tmp ! -name .tmp -exec rm -rf {} +
+  for name in auth.json installation_id .sandbox_migration tmp .tmp; do
+    target="$state/$name"
+    [ "$name" != auth.json ] || target="$shared/auth.json"
+    [ "$(readlink "$review/$name")" = "$target" ] ||
+      { rm -rf "${review:?}/$name"; ln -sfn "$target" "$review/$name"; }
+  done
+  printf '%s\n%s\n' "$review" "$state"
   ;;
 *)
   echo "Unknown command: $command" >&2
