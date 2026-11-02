@@ -64,6 +64,8 @@ type Pending = {
 export class AcpProcess {
   readonly exited: Promise<number | null>;
   private readonly sessions = new Map<string, AcpSession>();
+  /** Sessions whose close is in flight or failed, by id. */
+  private readonly closing = new Map<string, Promise<Error | undefined>>();
   private readonly calls = new Map<number, Pending>();
   private requests = 0;
   private buffer = "";
@@ -317,22 +319,41 @@ export class AcpProcess {
   }
 
   /** Ends a session. Its turn, if any, is cancelled first. The harness is
-   * asked to close it only when it says it can. */
-  async close(session: AcpSession) {
-    if (!this.sessions.delete(session.id)) return;
+   * asked to close it only when it says it can. A close already started is
+   * shared, and one that failed stays failed while the harness runs: `strict`
+   * rejects with it, as with a harness that cannot acknowledge one. Once the
+   * harness has exited the session counts as closed. */
+  async close(session: AcpSession, strict = false) {
+    let ending = this.closing.get(session.id);
+    if (!ending) {
+      if (!this.sessions.delete(session.id)) return;
+      ending = this.end(session);
+      this.closing.set(session.id, ending);
+      const settled = (failure?: unknown) => {
+        if (!failure) this.closing.delete(session.id);
+      };
+      void ending.then(settled, settled);
+    }
+    const failure = await ending;
+    if (failure && strict && this.alive) throw failure;
+  }
+  private async end(session: AcpSession) {
     session.fail("The session was closed");
     void session.server?.close();
     if (!this.alive) return;
     this.notify("session/cancel", { sessionId: session.id });
     if (this.hooks.closeSession !== "always" && !this.advertises("close"))
-      return;
-    await this.request(
-      "session/close",
-      { sessionId: session.id },
-      REQUEST_TIMEOUT_MS,
-    ).catch((error) =>
-      console.warn(`${this.hooks.label} did not close a session`, error),
-    );
+      return new Error("The harness cannot acknowledge session retirement");
+    try {
+      await this.request(
+        "session/close",
+        { sessionId: session.id },
+        REQUEST_TIMEOUT_MS,
+      );
+    } catch (error) {
+      console.warn(`${this.hooks.label} did not close a session`, error);
+      return error instanceof Error ? error : new Error(String(error));
+    }
   }
 
   kill() {
