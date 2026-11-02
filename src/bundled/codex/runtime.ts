@@ -186,6 +186,9 @@ type Server = {
   opening: Promise<AppServer>;
   /** Threads this process has loaded, and the agent, by key, each belongs to. */
   threads: Map<string, AgentKey>;
+  /** Starts a turn of a thread. What it returns takes why Auto-decide refused
+   * that turn's model input, if it said. */
+  explainer?(threadId: string): () => string | undefined;
 };
 export type SessionView = { key: string; status: string; detail: string };
 /** A saved binding, newest first, for the owner's transcript list, with the
@@ -646,6 +649,7 @@ export class CodexRuntime {
       server.opening = (async () => {
         await prior?.rpc.close();
         const bridge = await nativeProtectionBridge(serveMcp, protection);
+        server.explainer = bridge.explainer;
         rpc.onMessage((wire) => {
           if (wire.method === "connection/closed") {
             void bridge.close();
@@ -1776,6 +1780,7 @@ export class CodexRuntime {
         );
     });
     let hookBridge: Awaited<ReturnType<typeof openHookBridge>> | undefined;
+    let explain: (() => string | undefined) | undefined;
     try {
       const rpc = await server.opening;
       signal.throwIfAborted();
@@ -1836,6 +1841,8 @@ export class CodexRuntime {
           });
       } else started = await start();
       active.threadId = started.thread.id;
+      // A refusal outside this turn does not explain how it ends.
+      explain = server.explainer?.(active.threadId);
       bridge?.bind(active.threadId);
       server.threads.set(active.threadId, agent.key);
       signal.throwIfAborted();
@@ -1947,12 +1954,20 @@ export class CodexRuntime {
           await server.rpc.close();
         }
       }
+      const why = explain?.();
       if (!entry.abort.signal.aborted) {
         const reason = `Codex could not finish: ${message(error)}.`;
         await this.publish(active.reply, reason).catch((failure) =>
           console.error("Codex could not publish its failure", failure),
         );
-        this.status(agent.key, key, "Needs attention", reason);
+        // The denied input may have shaped the provider's reason, so it shows
+        // only on the owner's Activity tab, never in the thread agents read.
+        this.status(
+          agent.key,
+          key,
+          "Needs attention",
+          why ? `${reason} Reason: ${why}` : reason,
+        );
       }
     } finally {
       for (const taken of active.requests)
