@@ -22,6 +22,7 @@ import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
 import script from "./claude.sh?raw";
+import { PROTECTED_CLAUDE_VERSION } from "./security";
 
 const execFileAsync = promisify(execFile);
 const homes: string[] = [];
@@ -128,6 +129,13 @@ it("prunes older releases but keeps a newer one another build may be testing", a
   );
   await step("use", "0.3.0");
   expect(await folders()).toEqual(["0.10.0", "0.2.0", "0.3.0"]);
+});
+
+it("keeps the release protected agents run when it switches past it", async () => {
+  const pinned = PROTECTED_CLAUDE_VERSION;
+  const { step, folders } = await disk([pinned, "99.0.0", "99.1.0"], "99.0.0");
+  await step("use", "99.1.0");
+  expect(await folders()).toEqual([pinned, "99.0.0", "99.1.0"]);
 });
 
 /** Holds the switch lock, as a build that is switching does, until killed. */

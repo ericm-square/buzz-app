@@ -83,5 +83,10 @@ is not general workstation isolation or a guarantee against code that runs later
 outside Buzz. Runtime and installed-plugin code remain trusted. Declared native
 artifacts are verified and staged before launch; that does not verify an entire
 runtime dependency graph or defend against other unsandboxed same-user programs.
+Claude's protected agents and security reviews run its pinned release this way:
+the host runs only its own verified copy, so a changed file in the download
+folder never runs. Both ignore Claude settings files, so a Claude that reaches
+its model only through settings (gateway env or `apiKeyHelper`) cannot run
+reviews; they fail closed and need another review model.
 Broader restrictions on workspace writes, startup files and login jobs belong to
 Sandpit.

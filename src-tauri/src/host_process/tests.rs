@@ -314,6 +314,67 @@ fn a_bundled_program_runs_from_the_app_bin_never_path() {
 }
 
 #[test]
+fn artifacts_may_be_under_home() {
+    let process = |path: &str| -> HostProcess {
+        serde_json::from_value(serde_json::json!({
+            "id": "agent", "program": "agent",
+            "artifact": { "path": path, "sha256": "a".repeat(64) }
+        }))
+        .unwrap()
+    };
+    let path = |declared: HostProcess| declared.artifact.unwrap().path;
+    assert_eq!(
+        PathBuf::from(path(at_home(process("~/tools/agent")).unwrap())),
+        expand_home("~").unwrap().join("tools/agent")
+    );
+    assert_eq!(path(at_home(process("/opt/agent")).unwrap()), "/opt/agent");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn the_hook_guard_says_why_it_stopped_a_worker() {
+    let processes = HostProcesses::default();
+    let (sender, mut events) = channel();
+    let script = "echo not-json; exec sleep 30";
+    processes
+        .start_guarded(
+            0,
+            "a.plugin".into(),
+            "sh",
+            command("/bin/sh", &["-c", script]),
+            sender,
+            true,
+        )
+        .unwrap();
+    let (stdout, stderr, _) = until_exit(&mut events).await;
+    assert_eq!(stdout, "");
+    assert_eq!(stderr, "Invalid protected Claude frame\n");
+}
+
+#[test]
+fn only_the_protected_claude_cli_gets_the_hook_guard() {
+    let manifest: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../src/bundled/claude-code/manifest.json"
+    ))
+    .unwrap();
+    let declared = manifest["host"]["processes"].as_array().unwrap();
+    let cli = ["claude-protected-arm64", "claude-protected-x64"];
+    for process in declared {
+        let id = process["id"].as_str().unwrap();
+        // The pinned CLI artifacts are the only declared processes that run
+        // the CLI under protection; the protected file reader prints raw base64.
+        assert_eq!(process["artifact"].is_object(), cli.contains(&id), "{id}");
+        assert_eq!(
+            runs_protected_claude("buzz.claude-code", id, true),
+            cli.contains(&id),
+            "{id}"
+        );
+        assert!(!runs_protected_claude("buzz.claude-code", id, false));
+        assert!(!runs_protected_claude("other.plugin", id, true));
+    }
+}
+
+#[test]
 fn protected_launch_refuses_path_programs_and_preserves_bundled_resolution() {
     let store = tempfile::tempdir().unwrap();
     let mut process: HostProcess =

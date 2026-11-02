@@ -90,11 +90,12 @@ use)
   previous=$(cat "$dir/current" 2>/dev/null || true)
   printf %s "$version" >"$dir/current.$$"
   mv -f "$dir/current.$$" "$dir/current"
-  # Keep the new release, the one before it to fall back to, and any newer
-  # one, which another build may be testing; remove the rest.
+  # Keep the new release, the one before it to fall back to, any newer one,
+  # which another build may be testing, and the release protected agents run
+  # (`PROTECTED_CLAUDE_VERSION`); remove the rest.
   for folder in "$dir"/*/; do
     folder=$(basename "$folder")
-    [ "$folder" = "$version" ] || [ "$folder" = "$previous" ] ||
+    [ "$folder" = "$version" ] || [ "$folder" = "$previous" ] || [ "$folder" = "2.1.305" ] ||
       newer "$folder" "$version" || rm -rf "${dir:?}/$folder"
   done
   ;;
