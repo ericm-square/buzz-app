@@ -114,7 +114,7 @@ export type SavedConversation = Conversation &
     at: number;
   };
 
-const NAMES_TIMEOUT_MS = 2_000;
+const CONVERSATION_READ_TIMEOUT_MS = 4_000;
 const CHAT = [9, 40002];
 
 type Entry = {
@@ -356,7 +356,14 @@ export class ClaudeRuntime {
     working: boolean,
     signal: AbortSignal,
   ) {
-    return readTranscript(this.spawn, workspace, conversation, working, signal);
+    return readTranscript(
+      this.spawn,
+      workspace,
+      conversation,
+      working,
+      signal,
+      (pubkey) => this.reads(conversation.agent)?.name(pubkey),
+    );
   }
   /** The agent's latest session for a conversation that another build of the
    * app started, found in the workspace's Claude Code history. */
@@ -537,7 +544,6 @@ export class ClaudeRuntime {
           const text = turnPrompt({
             ...turn,
             agent: agent.key,
-            label: "@mention",
             channelLevel: topLevel && !solo,
             ...(wake
               ? { wake: { ...wake, text: (await wakeText?.()) ?? wake.text } }
@@ -843,7 +849,7 @@ export class ClaudeRuntime {
                 { kinds: CHAT, "#h": [channelId], "#e": [rootId], limit: 200 },
               ]
             : [{ kinds: CHAT, "#h": [channelId], limit: CONTEXT_LIMIT + 1 }],
-          AbortSignal.timeout(NAMES_TIMEOUT_MS * 2),
+          AbortSignal.timeout(CONVERSATION_READ_TIMEOUT_MS),
         );
         earlier = events
           .filter(
@@ -864,21 +870,6 @@ export class ClaudeRuntime {
       (item) =>
         item.created_at > seen && (!seen || item.pubkey !== agent.pubkey),
     );
-    const pubkeys = [
-      ...new Set([
-        event.pubkey,
-        ...unseen.map((item) => item.pubkey),
-        ...event.tags
-          .filter((tag) => tag[0] === "p")
-          .map((tag) => tag[1] ?? ""),
-      ]),
-    ].filter(Boolean);
-    if (reads)
-      await Promise.race([
-        reads.profiles(pubkeys).catch(() => undefined),
-        new Promise((resolve) => setTimeout(resolve, NAMES_TIMEOUT_MS)),
-      ]);
-    const members = summary?.members ?? [];
     const project = await reading;
     // An unread Canvas keeps the folders the chat had, not restarting it.
     if (project?.directories.length)
@@ -898,7 +889,6 @@ export class ClaudeRuntime {
       context: unseen,
       contextRoot,
       total: earlier.length + 1,
-      name: (pubkey: string) => reads?.name(pubkey, members),
       ...(project?.section ? { project: project.section } : {}),
     };
   }
